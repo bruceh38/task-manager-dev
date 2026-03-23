@@ -167,6 +167,16 @@ export default function App() {
         if (!alive) return;
         setUserId(user.id);
 
+        const defaultName = user.user_metadata?.name || `User-${user.id.slice(0, 6)}`;
+        const { error: ensureProfileError } = await supabase.rpc('ensure_my_profile', {
+          p_display_name: defaultName,
+          p_avatar_url: user.user_metadata?.avatar_url ?? null,
+          p_color: '#db2777',
+        });
+        if (ensureProfileError) {
+          throw ensureProfileError;
+        }
+
         await refresh(user.id);
 
         channel = supabase
@@ -380,6 +390,13 @@ export default function App() {
       user_id: userId,
     });
     if (insertError) throw insertError;
+  }
+
+  async function renameSelf(displayName: string) {
+    if (!userId) throw new Error('Guest session not ready.');
+    const { error: updateError } = await supabase.from('profiles').update({ display_name: displayName }).eq('id', userId);
+    if (updateError) throw updateError;
+    setUserProfiles((current) => current.map((profile) => (profile.id === userId ? { ...profile, display_name: displayName } : profile)));
   }
 
   async function createTask(input: {
@@ -705,7 +722,7 @@ export default function App() {
         <aside className="left-sidebar">
           <TeamPanel members={members} onCreateMember={createMember} />
           <LabelPanel labels={labels} onCreateLabel={createLabel} />
-          <UserPanel users={userProfiles} currentUserId={userId} />
+          <UserPanel users={userProfiles} currentUserId={userId} onRenameSelf={renameSelf} />
         </aside>
 
         <DndContext sensors={sensors} collisionDetection={closestCorners} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
