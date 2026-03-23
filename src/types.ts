@@ -29,6 +29,7 @@ export interface TeamMember {
   name: string;
   avatar_url: string | null;
   color: string;
+  profile_user_id: string | null;
   user_id: string;
   created_at: string;
 }

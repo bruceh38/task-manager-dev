@@ -5,7 +5,6 @@ import { Column } from './components/Column';
 import { LabelPanel } from './components/LabelPanel';
 import { TaskDetailPanel } from './components/TaskDetailPanel';
 import { TaskModal } from './components/TaskModal';
-import { TeamPanel } from './components/TeamPanel';
 import { UserPanel } from './components/UserPanel';
 import { STATUS_ORDER, STATUS_LABELS } from './constants';
 import { ensureGuestSession, supabase } from './lib/supabase';
@@ -49,7 +48,7 @@ async function loadBoardData(currentUserId: string) {
   const [ownedTaskRes, assignedTaskIdsRes, memberRes, labelRes, profilesRes] = await Promise.all([
     supabase.from('tasks').select('*').eq('user_id', currentUserId).order('created_at', { ascending: false }),
     supabase.from('task_user_assignees').select('task_id').eq('assignee_user_id', currentUserId),
-    supabase.from('team_members').select('*').eq('user_id', currentUserId).order('created_at', { ascending: true }),
+    supabase.from('team_members').select('*').order('created_at', { ascending: true }),
     supabase.from('labels').select('*').eq('user_id', currentUserId).order('created_at', { ascending: true }),
     supabase.from('profiles').select('*').order('created_at', { ascending: true }),
   ]);
@@ -81,7 +80,8 @@ async function loadBoardData(currentUserId: string) {
   if (taskIds.length === 0) {
     return {
       tasks,
-      members: (memberRes.data as TeamMember[]) ?? [],
+      members: ((memberRes.data as TeamMember[]) ?? []).filter((member) => member.user_id === currentUserId),
+      visibleTeamMembers: (memberRes.data as TeamMember[]) ?? [],
       labels: (labelRes.data as Label[]) ?? [],
       userProfiles: (profilesRes.data as UserProfile[]) ?? [],
       taskAssignees: [] as TaskAssignee[],
@@ -108,7 +108,8 @@ async function loadBoardData(currentUserId: string) {
 
   return {
     tasks,
-    members: (memberRes.data as TeamMember[]) ?? [],
+    members: ((memberRes.data as TeamMember[]) ?? []).filter((member) => member.user_id === currentUserId),
+    visibleTeamMembers: (memberRes.data as TeamMember[]) ?? [],
     labels: (labelRes.data as Label[]) ?? [],
     userProfiles: (profilesRes.data as UserProfile[]) ?? [],
     taskAssignees: (assignmentRes.data as TaskAssignee[]) ?? [],
@@ -122,6 +123,7 @@ async function loadBoardData(currentUserId: string) {
 export default function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [members, setMembers] = useState<TeamMember[]>([]);
+  const [visibleTeamMembers, setVisibleTeamMembers] = useState<TeamMember[]>([]);
   const [labels, setLabels] = useState<Label[]>([]);
   const [userProfiles, setUserProfiles] = useState<UserProfile[]>([]);
   const [taskAssignees, setTaskAssignees] = useState<TaskAssignee[]>([]);
@@ -150,6 +152,7 @@ export default function App() {
       if (!alive) return;
       setTasks(refreshed.tasks);
       setMembers(refreshed.members);
+      setVisibleTeamMembers(refreshed.visibleTeamMembers);
       setLabels(refreshed.labels);
       setUserProfiles(refreshed.userProfiles);
       setTaskAssignees(refreshed.taskAssignees);
@@ -347,6 +350,26 @@ export default function App() {
     return mapping;
   }, [activities]);
 
+  const teamMemberships = useMemo(() => {
+    const grouped: Record<string, TeamMember[]> = {};
+    for (const member of visibleTeamMembers) {
+      if (!grouped[member.user_id]) {
+        grouped[member.user_id] = [];
+      }
+      grouped[member.user_id].push(member);
+    }
+
+    const profileById = new Map(userProfiles.map((profile) => [profile.id, profile]));
+
+    return Object.entries(grouped)
+      .filter(([ownerId, teamMembers]) => ownerId !== userId && teamMembers.some((member) => member.profile_user_id === userId))
+      .map(([ownerId, teamMembers]) => ({
+        ownerId,
+        ownerName: profileById.get(ownerId)?.display_name ?? `User-${ownerId.slice(0, 6)}`,
+        members: teamMembers,
+      }));
+  }, [visibleTeamMembers, userProfiles, userId]);
+
   const selectedTask = useMemo(() => tasks.find((task) => task.id === selectedTaskId) ?? null, [tasks, selectedTaskId]);
 
   const summary = useMemo(() => {
@@ -371,12 +394,30 @@ export default function App() {
     }
   }
 
-  async function createMember(input: { name: string; color: string; avatarUrl: string | null }) {
+  async function createMember(input: { name: string; color: string; avatarUrl: string | null; profileUserId?: string | null }) {
     if (!userId) throw new Error('Guest session not ready.');
+    if (input.profileUserId) {
+      const { error: insertError } = await supabase
+        .from('team_members')
+        .upsert(
+          {
+            name: input.name,
+            color: input.color,
+            avatar_url: input.avatarUrl,
+            profile_user_id: input.profileUserId,
+            user_id: userId,
+          },
+          { onConflict: 'user_id,profile_user_id', ignoreDuplicates: true },
+        );
+      if (insertError) throw insertError;
+      return;
+    }
+
     const { error: insertError } = await supabase.from('team_members').insert({
       name: input.name,
       color: input.color,
       avatar_url: input.avatarUrl,
+      profile_user_id: null,
       user_id: userId,
     });
     if (insertError) throw insertError;
@@ -397,6 +438,19 @@ export default function App() {
     const { error: updateError } = await supabase.from('profiles').update({ display_name: displayName }).eq('id', userId);
     if (updateError) throw updateError;
     setUserProfiles((current) => current.map((profile) => (profile.id === userId ? { ...profile, display_name: displayName } : profile)));
+  }
+
+  async function addMemberFromRealUser(profileUserId: string) {
+    const profile = userProfiles.find((user) => user.id === profileUserId);
+    if (!profile) {
+      throw new Error('User not found.');
+    }
+    await createMember({
+      name: profile.display_name,
+      avatarUrl: profile.avatar_url,
+      color: profile.color,
+      profileUserId: profile.id,
+    });
   }
 
   async function createTask(input: {
@@ -490,43 +544,6 @@ export default function App() {
     if (existing.priority !== input.priority)
       items.push({ task_id: taskId, event_type: 'edited', message: `Changed priority from ${existing.priority} to ${input.priority}` });
     if (existing.due_date !== nextDueDate) items.push({ task_id: taskId, event_type: 'edited', message: `Updated due date to ${nextDueDate ?? 'none'}` });
-    await createActivities(items);
-  }
-
-  async function updateTaskAssignments(taskId: string, memberIds: string[]) {
-    if (!userId) throw new Error('Guest session not ready.');
-
-    const currentMemberIds = taskAssignees.filter((assignment) => assignment.task_id === taskId).map((assignment) => assignment.member_id);
-    const existingSet = new Set(currentMemberIds);
-    const nextSet = new Set(memberIds);
-    const added = memberIds.filter((id) => !existingSet.has(id));
-    const removed = currentMemberIds.filter((id) => !nextSet.has(id));
-    if (added.length === 0 && removed.length === 0) return;
-
-    if (removed.length > 0) {
-      const { error: deleteError } = await supabase
-        .from('task_assignees')
-        .delete()
-        .eq('task_id', taskId)
-        .eq('user_id', userId)
-        .in('member_id', removed);
-      if (deleteError) throw deleteError;
-    }
-    if (added.length > 0) {
-      const payload = added.map((memberId) => ({ task_id: taskId, member_id: memberId, user_id: userId }));
-      const { error: insertError } = await supabase.from('task_assignees').insert(payload);
-      if (insertError) throw insertError;
-    }
-
-    const items: ActivityInput[] = [];
-    for (const memberId of added) {
-      const member = members.find((candidate) => candidate.id === memberId);
-      if (member) items.push({ task_id: taskId, event_type: 'assignment_added', message: `Assigned ${member.name}` });
-    }
-    for (const memberId of removed) {
-      const member = members.find((candidate) => candidate.id === memberId);
-      if (member) items.push({ task_id: taskId, event_type: 'assignment_removed', message: `Removed assignee ${member.name}` });
-    }
     await createActivities(items);
   }
 
@@ -720,9 +737,15 @@ export default function App() {
 
       <section className="board-layout">
         <aside className="left-sidebar">
-          <TeamPanel members={members} onCreateMember={createMember} />
           <LabelPanel labels={labels} onCreateLabel={createLabel} />
-          <UserPanel users={userProfiles} currentUserId={userId} onRenameSelf={renameSelf} />
+          <UserPanel
+            users={userProfiles}
+            members={members}
+            teamMemberships={teamMemberships}
+            currentUserId={userId}
+            onRenameSelf={renameSelf}
+            onAddMemberFromUser={addMemberFromRealUser}
+          />
         </aside>
 
         <DndContext sensors={sensors} collisionDetection={closestCorners} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
@@ -764,9 +787,7 @@ export default function App() {
         task={selectedTask}
         comments={selectedTask ? commentsByTaskId[selectedTask.id] ?? [] : []}
         activities={selectedTask ? activitiesByTaskId[selectedTask.id] ?? [] : []}
-        assignees={selectedTask ? taskAssigneesByTaskId[selectedTask.id] ?? [] : []}
         userAssignees={selectedTask ? taskUserAssigneesByTaskId[selectedTask.id] ?? [] : []}
-        members={members}
         labels={labels}
         taskLabels={selectedTask ? taskLabelsByTaskId[selectedTask.id] ?? [] : []}
         users={userProfiles}
@@ -774,7 +795,6 @@ export default function App() {
         onClose={() => setSelectedTaskId(null)}
         onAddComment={addComment}
         onUpdateTask={updateTaskDetails}
-        onUpdateAssignments={updateTaskAssignments}
         onUpdateLabels={updateTaskLabels}
         onUpdateUserAssignments={updateTaskUserAssignments}
       />

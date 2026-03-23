@@ -24,9 +24,30 @@ create table if not exists public.team_members (
   name text not null check (char_length(trim(name)) > 0),
   avatar_url text,
   color text not null default '#ec4899',
+  profile_user_id uuid references public.profiles(id) on delete set null,
   user_id uuid not null references auth.users(id) on delete cascade,
   created_at timestamptz not null default now()
 );
+
+alter table public.team_members
+  add column if not exists profile_user_id uuid;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'team_members_profile_user_id_fkey'
+      and conrelid = 'public.team_members'::regclass
+  ) then
+    alter table public.team_members
+      add constraint team_members_profile_user_id_fkey
+      foreign key (profile_user_id)
+      references public.profiles(id)
+      on delete set null;
+  end if;
+end
+$$;
 
 create table if not exists public.labels (
   id uuid primary key default gen_random_uuid(),
@@ -82,6 +103,9 @@ create index if not exists idx_tasks_user_id on public.tasks(user_id);
 create index if not exists idx_tasks_status on public.tasks(status);
 create index if not exists idx_tasks_due_date on public.tasks(due_date);
 create index if not exists idx_team_members_user_id on public.team_members(user_id);
+drop index if exists idx_team_members_user_profile_unique;
+create unique index if not exists idx_team_members_user_profile_unique
+  on public.team_members(user_id, profile_user_id);
 create index if not exists idx_labels_user_id on public.labels(user_id);
 create index if not exists idx_profiles_created_at on public.profiles(created_at);
 create index if not exists idx_task_assignees_user_id on public.task_assignees(user_id);
@@ -162,6 +186,25 @@ revoke all on function public.can_access_task(uuid) from public;
 grant execute on function public.is_task_owner(uuid) to authenticated;
 grant execute on function public.is_task_assignee(uuid) to authenticated;
 grant execute on function public.can_access_task(uuid) to authenticated;
+
+create or replace function public.can_access_team(team_owner_id uuid)
+returns boolean
+language sql
+security definer
+set search_path = public
+as $$
+  select
+    auth.uid() = team_owner_id
+    or exists (
+      select 1
+      from public.team_members tm
+      where tm.user_id = team_owner_id
+        and tm.profile_user_id = auth.uid()
+    );
+$$;
+
+revoke all on function public.can_access_team(uuid) from public;
+grant execute on function public.can_access_team(uuid) to authenticated;
 
 create or replace function public.ensure_my_profile(
   p_display_name text,
@@ -307,7 +350,7 @@ create policy "team_members_select_own"
   on public.team_members
   for select
   to authenticated
-  using (auth.uid() = user_id);
+  using (public.can_access_team(user_id));
 
 create policy "team_members_insert_own"
   on public.team_members

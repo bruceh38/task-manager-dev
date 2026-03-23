@@ -1,16 +1,14 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { format, formatDistanceToNowStrict } from 'date-fns';
 import { STATUS_LABELS } from '../constants';
-import type { Comment, Label, Priority, Task, TaskActivity, TeamMember, UserProfile } from '../types';
+import type { Comment, Label, Priority, Task, TaskActivity, UserProfile } from '../types';
 
 interface TaskDetailPanelProps {
   open: boolean;
   task: Task | null;
   comments: Comment[];
   activities: TaskActivity[];
-  assignees: TeamMember[];
   userAssignees: UserProfile[];
-  members: TeamMember[];
   labels: Label[];
   taskLabels: Label[];
   users: UserProfile[];
@@ -18,7 +16,6 @@ interface TaskDetailPanelProps {
   onClose: () => void;
   onAddComment: (taskId: string, body: string) => Promise<void>;
   onUpdateTask: (taskId: string, input: { title: string; description: string; priority: Priority; dueDate: string | null }) => Promise<void>;
-  onUpdateAssignments: (taskId: string, memberIds: string[]) => Promise<void>;
   onUpdateLabels: (taskId: string, labelIds: string[]) => Promise<void>;
   onUpdateUserAssignments: (taskId: string, userIds: string[]) => Promise<void>;
 }
@@ -28,9 +25,7 @@ export function TaskDetailPanel({
   task,
   comments,
   activities,
-  assignees,
   userAssignees,
-  members,
   labels,
   taskLabels,
   users,
@@ -38,7 +33,6 @@ export function TaskDetailPanel({
   onClose,
   onAddComment,
   onUpdateTask,
-  onUpdateAssignments,
   onUpdateLabels,
   onUpdateUserAssignments,
 }: TaskDetailPanelProps) {
@@ -47,7 +41,6 @@ export function TaskDetailPanel({
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<Priority>('normal');
   const [dueDate, setDueDate] = useState('');
-  const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
   const [selectedLabelIds, setSelectedLabelIds] = useState<string[]>([]);
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [commentSubmitting, setCommentSubmitting] = useState(false);
@@ -74,10 +67,6 @@ export function TaskDetailPanel({
   }, [task]);
 
   useEffect(() => {
-    setSelectedMemberIds(assignees.map((member) => member.id));
-  }, [assignees]);
-
-  useEffect(() => {
     setSelectedLabelIds(taskLabels.map((label) => label.id));
   }, [taskLabels]);
 
@@ -87,12 +76,6 @@ export function TaskDetailPanel({
 
   if (!open || !task) return null;
   const currentTask = task;
-
-  function toggleMember(memberId: string) {
-    setSelectedMemberIds((current) =>
-      current.includes(memberId) ? current.filter((id) => id !== memberId) : [...current, memberId],
-    );
-  }
 
   function toggleLabel(labelId: string) {
     setSelectedLabelIds((current) => (current.includes(labelId) ? current.filter((id) => id !== labelId) : [...current, labelId]));
@@ -141,18 +124,6 @@ export function TaskDetailPanel({
       setError(saveError instanceof Error ? saveError.message : 'Could not update task.');
     } finally {
       setSavingTask(false);
-    }
-  }
-
-  async function handleAssignmentsSave() {
-    try {
-      setSavingAssignments(true);
-      setError(null);
-      await onUpdateAssignments(currentTask.id, selectedMemberIds);
-    } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : 'Could not update assignments.');
-    } finally {
-      setSavingAssignments(false);
     }
   }
 
@@ -236,7 +207,7 @@ export function TaskDetailPanel({
           </form>
         </section>
 
-        <section className="detail-assignees">
+        {/* <section className="detail-assignees">
           <h3>Assignees</h3>
           <div className="assignee-options">
             {members.length === 0 ? <p className="assignee-empty">No team members yet.</p> : null}
@@ -261,7 +232,7 @@ export function TaskDetailPanel({
           <button type="button" onClick={handleAssignmentsSave} disabled={savingAssignments}>
             {savingAssignments ? 'Saving...' : 'Save assignees'}
           </button>
-        </section>
+        </section> */}
 
         <section className="detail-assignees">
           <h3>Labels</h3>

@@ -841,6 +841,19 @@ button[type='submit'] {
   font-size: 0.88rem;
 }
 
+.team-membership-card {
+  border: 1px solid var(--border);
+  padding: 0.45rem 0.5rem;
+  background: #fff8fc;
+}
+
+.team-membership-list {
+  margin-top: 0.45rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
 .team-form {
   margin-top: 0.9rem;
   border-top: 1px solid var(--border);
