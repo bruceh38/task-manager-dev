@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/constants.ts","./src/main.tsx","./src/types.ts","./src/vite-env.d.ts","./src/components/column.tsx","./src/components/labelpanel.tsx","./src/components/taskcard.tsx","./src/components/taskdetailpanel.tsx","./src/components/taskmodal.tsx","./src/components/teampanel.tsx","./src/components/userpanel.tsx","./src/lib/supabase.ts"],"version":"5.9.3"}
