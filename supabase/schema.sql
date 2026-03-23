@@ -506,11 +506,7 @@ create policy "comments_insert_own"
   to authenticated
   with check (
     auth.uid() = user_id
-    and exists (
-      select 1
-      from public.tasks t
-      where t.id = task_id and t.user_id = auth.uid()
-    )
+    and public.can_access_task(task_id)
   );
 
 create policy "comments_update_own"

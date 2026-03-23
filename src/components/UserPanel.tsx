@@ -21,6 +21,7 @@ export function UserPanel({ users, members, teamMemberships, currentUserId, onRe
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [addingUserId, setAddingUserId] = useState<string | null>(null);
+  const [pendingUserId, setPendingUserId] = useState('');
 
   const memberProfileIdSet = useMemo(
     () => new Set(members.map((member) => member.profile_user_id).filter((id): id is string => Boolean(id))),
@@ -53,6 +54,7 @@ export function UserPanel({ users, members, teamMemberships, currentUserId, onRe
     try {
       setAddingUserId(userId);
       await onAddMemberFromUser(userId);
+      setPendingUserId('');
     } finally {
       setAddingUserId(null);
     }
@@ -115,29 +117,37 @@ export function UserPanel({ users, members, teamMemberships, currentUserId, onRe
         </div>
       </section>
 
-      <div className="team-member-list">
+      <section className="detail-assignees">
+        <h3>Real users</h3>
         {visibleUsers.length === 0 ? <p className="team-empty">No other users found yet.</p> : null}
-        {visibleUsers.map((user) => (
-          <article key={user.id} className="team-member">
-            {user.avatar_url ? (
-              <img src={user.avatar_url} alt={user.display_name} className="avatar" />
-            ) : (
-              <span className="avatar avatar-fallback" style={{ background: user.color }}>
-                {user.display_name.slice(0, 1).toUpperCase()}
-              </span>
-            )}
-            <strong>{user.display_name}</strong>
+        {visibleUsers.length > 0 ? (
+          <div className="form-grid">
+            <label>
+              Select user
+              <select value={pendingUserId} onChange={(event) => setPendingUserId(event.target.value)}>
+                <option value="">Choose a user</option>
+                {visibleUsers.map((user) => (
+                  <option key={user.id} value={user.id}>
+                    {user.display_name}
+                  </option>
+                ))}
+              </select>
+            </label>
             <button
               type="button"
               className="secondary"
-              disabled={addingUserId === user.id || memberProfileIdSet.has(user.id)}
-              onClick={() => handleAddMember(user.id)}
+              disabled={!pendingUserId || addingUserId === pendingUserId || memberProfileIdSet.has(pendingUserId)}
+              onClick={() => handleAddMember(pendingUserId)}
             >
-              {memberProfileIdSet.has(user.id) ? 'Added' : addingUserId === user.id ? 'Adding...' : 'Add member'}
+              {pendingUserId && memberProfileIdSet.has(pendingUserId)
+                ? 'Added'
+                : pendingUserId && addingUserId === pendingUserId
+                  ? 'Adding...'
+                  : 'Add member'}
             </button>
-          </article>
-        ))}
-      </div>
+          </div>
+        ) : null}
+      </section>
     </section>
   );
 }

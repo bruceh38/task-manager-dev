@@ -43,6 +43,7 @@ export function TaskDetailPanel({
   const [dueDate, setDueDate] = useState('');
   const [selectedLabelIds, setSelectedLabelIds] = useState<string[]>([]);
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
+  const [pendingUserId, setPendingUserId] = useState('');
   const [commentSubmitting, setCommentSubmitting] = useState(false);
   const [savingTask, setSavingTask] = useState(false);
   const [savingAssignments, setSavingAssignments] = useState(false);
@@ -76,6 +77,7 @@ export function TaskDetailPanel({
 
   if (!open || !task) return null;
   const currentTask = task;
+  const availableUsers = users.filter((user) => user.id !== currentUserId);
 
   function toggleLabel(labelId: string) {
     setSelectedLabelIds((current) => (current.includes(labelId) ? current.filter((id) => id !== labelId) : [...current, labelId]));
@@ -83,6 +85,12 @@ export function TaskDetailPanel({
 
   function toggleUser(userId: string) {
     setSelectedUserIds((current) => (current.includes(userId) ? current.filter((id) => id !== userId) : [...current, userId]));
+  }
+
+  function addPendingUser() {
+    if (!pendingUserId) return;
+    setSelectedUserIds((current) => (current.includes(pendingUserId) ? current : [...current, pendingUserId]));
+    setPendingUserId('');
   }
 
   async function handleCommentSubmit(event: FormEvent<HTMLFormElement>) {
@@ -262,28 +270,42 @@ export function TaskDetailPanel({
 
         <section className="detail-assignees">
           <h3>Real Users</h3>
-          <div className="assignee-options">
-            {users.filter((user) => user.id !== currentUserId).length === 0 ? <p className="assignee-empty">No other users yet.</p> : null}
-            {users
-              .filter((user) => user.id !== currentUserId)
-              .map((user) => {
-                const selected = selectedUserIds.includes(user.id);
+          {availableUsers.length === 0 ? <p className="assignee-empty">No other users yet.</p> : null}
+          {availableUsers.length > 0 ? (
+            <div className="form-grid">
+              <label>
+                Select user
+                <select value={pendingUserId} onChange={(event) => setPendingUserId(event.target.value)}>
+                  <option value="">Choose a user</option>
+                  {availableUsers.map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.display_name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button type="button" className="secondary" onClick={addPendingUser} disabled={!pendingUserId}>
+                Add user
+              </button>
+            </div>
+          ) : null}
+          {selectedUserIds.length > 0 ? (
+            <div className="assignee-options">
+              {selectedUserIds.map((userId) => {
+                const user = users.find((candidate) => candidate.id === userId);
+                if (!user) return null;
                 return (
-                  <label key={user.id} className={`assignee-option ${selected ? 'selected' : ''}`}>
-                    <input
-                      type="checkbox"
-                      checked={selected}
-                      onChange={() => toggleUser(user.id)}
-                      aria-label={`Assign ${user.display_name}`}
-                    />
+                  <button key={user.id} type="button" className="assignee-option selected" onClick={() => toggleUser(user.id)}>
                     <span className="avatar avatar-fallback" style={{ background: user.color }}>
                       {user.display_name.slice(0, 1).toUpperCase()}
                     </span>
                     <span>{user.display_name}</span>
-                  </label>
+                    <span aria-hidden="true">x</span>
+                  </button>
                 );
               })}
-          </div>
+            </div>
+          ) : null}
           <button type="button" onClick={handleUsersSave} disabled={savingAssignments}>
             {savingAssignments ? 'Saving...' : 'Save real-user assignees'}
           </button>

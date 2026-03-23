@@ -27,6 +27,7 @@ export function TaskModal({ open, members, labels, users, currentUserId, onClose
   const [assigneeIds, setAssigneeIds] = useState<string[]>([]);
   const [labelIds, setLabelIds] = useState<string[]>([]);
   const [userAssigneeIds, setUserAssigneeIds] = useState<string[]>([]);
+  const [pendingUserAssigneeId, setPendingUserAssigneeId] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,6 +47,12 @@ export function TaskModal({ open, members, labels, users, currentUserId, onClose
     setUserAssigneeIds((current) =>
       current.includes(userAssigneeId) ? current.filter((id) => id !== userAssigneeId) : [...current, userAssigneeId],
     );
+  }
+
+  function addPendingUserAssignee() {
+    if (!pendingUserAssigneeId) return;
+    setUserAssigneeIds((current) => (current.includes(pendingUserAssigneeId) ? current : [...current, pendingUserAssigneeId]));
+    setPendingUserAssigneeId('');
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -74,6 +81,7 @@ export function TaskModal({ open, members, labels, users, currentUserId, onClose
       setAssigneeIds([]);
       setLabelIds([]);
       setUserAssigneeIds([]);
+      setPendingUserAssigneeId('');
       onClose();
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : 'Could not create task.');
@@ -170,30 +178,44 @@ export function TaskModal({ open, members, labels, users, currentUserId, onClose
 
           <fieldset className="assignee-fieldset">
             <legend>Real users</legend>
-            {users.filter((user) => user.id !== currentUserId).length === 0 ? (
-              <p className="assignee-empty">No other users available.</p>
+            {users.filter((user) => user.id !== currentUserId).length === 0 ? <p className="assignee-empty">No other users available.</p> : null}
+            {users.filter((user) => user.id !== currentUserId).length > 0 ? (
+              <div className="form-grid">
+                <label>
+                  Select user
+                  <select value={pendingUserAssigneeId} onChange={(event) => setPendingUserAssigneeId(event.target.value)}>
+                    <option value="">Choose a user</option>
+                    {users
+                      .filter((user) => user.id !== currentUserId)
+                      .map((user) => (
+                        <option key={user.id} value={user.id}>
+                          {user.display_name}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                <button type="button" className="secondary" onClick={addPendingUserAssignee} disabled={!pendingUserAssigneeId}>
+                  Add user
+                </button>
+              </div>
             ) : null}
-            <div className="assignee-options">
-              {users
-                .filter((user) => user.id !== currentUserId)
-                .map((user) => {
-                  const selected = userAssigneeIds.includes(user.id);
+            {userAssigneeIds.length > 0 ? (
+              <div className="assignee-options">
+                {userAssigneeIds.map((id) => {
+                  const user = users.find((candidate) => candidate.id === id);
+                  if (!user) return null;
                   return (
-                    <label key={user.id} className={`assignee-option ${selected ? 'selected' : ''}`}>
-                      <input
-                        type="checkbox"
-                        checked={selected}
-                        onChange={() => toggleUserAssignee(user.id)}
-                        aria-label={`Assign ${user.display_name}`}
-                      />
+                    <button key={user.id} type="button" className="assignee-option selected" onClick={() => toggleUserAssignee(user.id)}>
                       <span className="avatar avatar-fallback" style={{ background: user.color }}>
                         {user.display_name.slice(0, 1).toUpperCase()}
                       </span>
                       <span>{user.display_name}</span>
-                    </label>
+                      <span aria-hidden="true">x</span>
+                    </button>
                   );
                 })}
-            </div>
+              </div>
+            ) : null}
           </fieldset>
 
           {error ? <div className="form-error">{error}</div> : null}
