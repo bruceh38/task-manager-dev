@@ -163,6 +163,67 @@ grant execute on function public.is_task_owner(uuid) to authenticated;
 grant execute on function public.is_task_assignee(uuid) to authenticated;
 grant execute on function public.can_access_task(uuid) to authenticated;
 
+create or replace function public.ensure_my_profile(
+  p_display_name text,
+  p_avatar_url text,
+  p_color text default '#db2777'
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'Not authenticated';
+  end if;
+
+  insert into public.profiles (id, display_name, avatar_url, color)
+  values (auth.uid(), coalesce(nullif(trim(p_display_name), ''), 'User'), p_avatar_url, coalesce(p_color, '#db2777'))
+  on conflict (id)
+  do update set
+    display_name = excluded.display_name,
+    avatar_url = excluded.avatar_url,
+    color = excluded.color;
+end;
+$$;
+
+revoke all on function public.ensure_my_profile(text, text, text) from public;
+grant execute on function public.ensure_my_profile(text, text, text) to authenticated;
+
+create or replace function public.handle_new_auth_user_profile()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.profiles (id, display_name, avatar_url, color)
+  values (
+    new.id,
+    coalesce(nullif(trim(new.raw_user_meta_data ->> 'name'), ''), 'User-' || left(new.id::text, 6)),
+    new.raw_user_meta_data ->> 'avatar_url',
+    '#db2777'
+  )
+  on conflict (id) do nothing;
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created_profile on auth.users;
+create trigger on_auth_user_created_profile
+after insert on auth.users
+for each row execute function public.handle_new_auth_user_profile();
+
+insert into public.profiles (id, display_name, avatar_url, color)
+select
+  u.id,
+  coalesce(nullif(trim(u.raw_user_meta_data ->> 'name'), ''), 'User-' || left(u.id::text, 6)),
+  u.raw_user_meta_data ->> 'avatar_url',
+  '#db2777'
+from auth.users u
+on conflict (id) do nothing;
+
 drop policy if exists "tasks_select_own" on public.tasks;
 drop policy if exists "tasks_insert_own" on public.tasks;
 drop policy if exists "tasks_update_own" on public.tasks;

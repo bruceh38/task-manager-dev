@@ -162,32 +162,31 @@ button[type='submit'] {
 }
 
 .board-layout {
-  display: grid;
-  grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
+  display: flex;
   gap: 1rem;
-  align-items: start;
+  align-items: flex-start;
   width: 100%;
   max-width: 100%;
   overflow: hidden;
+  position: relative;
 }
 
 .left-sidebar {
   display: grid;
   gap: 1rem;
-  margin-left: 0;
-  transform: none;
-  padding-right: 0;
   position: relative;
-  z-index: 2;
-  min-width: 0;
-  max-width: 100%;
+  flex: 0 0 260px;
+  max-width: 80rem;
+  padding-right: 0;
+  z-index: 0;
 }
 
 .board-layout .board-grid {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   position: relative;
-  z-index: 1;
+  z-index: 0;
   padding-right: 0;
 }
 
@@ -881,7 +880,14 @@ button[type='submit'] {
 
 @media (max-width: 1100px) {
   .board-layout {
+    display: grid;
     grid-template-columns: 1fr;
+  }
+
+  .left-sidebar {
+    flex: none;
+    width: 100%;
+    max-width: none;
   }
 
   .board-grid {

@@ -167,18 +167,6 @@ export default function App() {
         if (!alive) return;
         setUserId(user.id);
 
-        const defaultName = user.user_metadata?.name || `User-${user.id.slice(0, 6)}`;
-        const { error: profileError } = await supabase.from('profiles').upsert(
-          {
-            id: user.id,
-            display_name: defaultName,
-            avatar_url: user.user_metadata?.avatar_url ?? null,
-            color: '#db2777',
-          },
-          { onConflict: 'id' },
-        );
-        if (profileError) throw profileError;
-
         await refresh(user.id);
 
         channel = supabase

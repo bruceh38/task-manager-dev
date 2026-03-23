@@ -67,17 +67,17 @@ export function TeamPanel({ members, onCreateMember }: TeamPanelProps) {
         <h3>Add member</h3>
         <label>
           Name
-          <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Avery Chen" />
+          <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Bruce Huang" />
         </label>
         <div className="team-form-row">
           <label>
             Color
             <input type="color" value={color} onChange={(event) => setColor(event.target.value)} />
           </label>
-          <label>
+          {/* <label>
             Avatar URL (optional)
             <input value={avatarUrl} onChange={(event) => setAvatarUrl(event.target.value)} placeholder="https://..." />
-          </label>
+          </label> */}
         </div>
         {error ? <div className="form-error">{error}</div> : null}
         <button type="submit" disabled={submitting}>
