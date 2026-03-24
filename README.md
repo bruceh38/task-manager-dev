@@ -1,6 +1,6 @@
 # Flowboard - Kanban Task Board
 
-A production-style Kanban board built with React + Supabase for the internship assessment.
+A Kanban board built with React + Supabase.
 
 This project supports:
 - anonymous guest auth
@@ -8,7 +8,7 @@ This project supports:
 - cross-user task assignment and collaboration visibility
 - comments, activity log, labels, filters, and realtime refresh
 
-## 1) What the app does
+## 1) Functionalities
 
 Core board behavior:
 - Four statuses: `todo`, `in_progress`, `in_review`, `done`
@@ -25,7 +25,6 @@ Collaboration behavior:
 Team behavior:
 - Each user owns a private team roster (`team_members`)
 - Team roster can include linked real users (`profile_user_id`)
-- Duplicate linked members are prevented by unique index on `(user_id, profile_user_id)`
 - Users can see teams they belong to
 
 ## 2) Tech stack
@@ -56,8 +55,6 @@ src/
     UserPanel.tsx              # Account rename + team/member management
 supabase/
   schema.sql                   # Full schema, functions, RLS, grants, realtime publication
-docs/
-  ARCHITECTURE.md              # Detailed runtime/data/security logic
 ```
 
 ## 4) Runtime logic summary
@@ -80,7 +77,6 @@ docs/
   - write `task_activities` status event
 
 - Assignment model:
-  - Team-member assignment uses `task_assignees` (owner-local roster)
   - Real-user assignment uses `task_user_assignees` (cross-user visibility)
 
 ## 5) Security model (RLS)
@@ -100,7 +96,6 @@ High-level policy rules:
 - `task_activities`: visible to users with task access
 - `team_members`: visible if `can_access_team(user_id)`
 
-See full policy-by-policy mapping in [ARCHITECTURE.md](/Users/newuser/Downloads/task-manager/docs/ARCHITECTURE.md).
 
 ## 6) Local setup
 
@@ -142,44 +137,7 @@ npm run build
 
 Supported free hosting:
 - Vercel
-- Netlify
-- Cloudflare Pages
-- EC2/static hosting (build `dist/`, upload, serve with nginx)
 
-Build output folder:
-- `dist`
-
-Required runtime env vars:
-- `VITE_SUPABASE_URL`
-- `VITE_SUPABASE_ANON_KEY`
-
-## 8) Troubleshooting
-
-### 409 on `POST /rest/v1/profiles`
-Cause:
-- inserting duplicate profile ID directly instead of upsert/RPC flow.
-
-Fix:
-- use `ensure_my_profile` RPC on boot (already implemented)
-- avoid direct unconditional `insert` for existing user IDs
-
-### 400 on `team_members?on_conflict=user_id,profile_user_id`
-Cause:
-- missing unique or exclusion constraint for conflict target.
-
-Fix:
-- ensure unique index exists:
-  - `create unique index ... on public.team_members(user_id, profile_user_id)`
-
-### 500 when reading tasks/assignees
-Cause:
-- policy/function mismatch or stale schema.
-
-Fix:
-- re-run [supabase/schema.sql](/Users/newuser/Downloads/task-manager/supabase/schema.sql) completely
-- verify helper functions and policies were created successfully
-
-## 9) Assessment submission
 
 Use [SUBMISSION.md](/Users/newuser/Downloads/task-manager/SUBMISSION.md) to provide:
 - live demo URL
