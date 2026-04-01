@@ -1,5 +1,24 @@
+-- ============================================================================
+-- Flowboard Supabase Schema
+-- ============================================================================
+-- This SQL file is intentionally idempotent as much as possible:
+-- - `create ... if not exists`
+-- - guarded `alter` and `do $$` blocks
+-- - safe policy drops/recreates
+--
+-- Why idempotent matters:
+-- You can re-run this file during development without manually resetting
+-- the entire database for most schema/policy changes.
+-- ============================================================================
+
+-- Needed for UUID generation via `gen_random_uuid()`.
 create extension if not exists "pgcrypto";
 
+-- ----------------------------------------------------------------------------
+-- profiles
+-- ----------------------------------------------------------------------------
+-- One row per auth user.
+-- Stores public-facing display metadata used throughout UI.
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   display_name text not null check (char_length(trim(display_name)) > 0),
@@ -8,6 +27,10 @@ create table if not exists public.profiles (
   created_at timestamptz not null default now()
 );
 
+-- ----------------------------------------------------------------------------
+-- tasks
+-- ----------------------------------------------------------------------------
+-- Core business entity for the board.
 create table if not exists public.tasks (
   id uuid primary key default gen_random_uuid(),
   title text not null check (char_length(trim(title)) > 0),
@@ -19,6 +42,13 @@ create table if not exists public.tasks (
   created_at timestamptz not null default now()
 );
 
+-- ----------------------------------------------------------------------------
+-- team_members
+-- ----------------------------------------------------------------------------
+-- Owner-local roster.
+-- `user_id` = team owner
+-- `profile_user_id` = optional link to a real user profile
+--                    (used to prevent duplicate logical members even if names change)
 create table if not exists public.team_members (
   id uuid primary key default gen_random_uuid(),
   name text not null check (char_length(trim(name)) > 0),
@@ -29,9 +59,11 @@ create table if not exists public.team_members (
   created_at timestamptz not null default now()
 );
 
+-- Migration safety: add missing column if older DB version lacks it.
 alter table public.team_members
   add column if not exists profile_user_id uuid;
 
+-- Migration safety: add FK only if it does not already exist.
 do $$
 begin
   if not exists (
@@ -49,6 +81,9 @@ begin
 end
 $$;
 
+-- ----------------------------------------------------------------------------
+-- labels
+-- ----------------------------------------------------------------------------
 create table if not exists public.labels (
   id uuid primary key default gen_random_uuid(),
   name text not null check (char_length(trim(name)) > 0),
@@ -57,6 +92,10 @@ create table if not exists public.labels (
   created_at timestamptz not null default now()
 );
 
+-- ----------------------------------------------------------------------------
+-- task_assignees
+-- ----------------------------------------------------------------------------
+-- Join table: task <-> owner-local team member.
 create table if not exists public.task_assignees (
   task_id uuid not null references public.tasks(id) on delete cascade,
   member_id uuid not null references public.team_members(id) on delete cascade,
@@ -65,6 +104,10 @@ create table if not exists public.task_assignees (
   primary key (task_id, member_id)
 );
 
+-- ----------------------------------------------------------------------------
+-- task_labels
+-- ----------------------------------------------------------------------------
+-- Join table: task <-> label.
 create table if not exists public.task_labels (
   task_id uuid not null references public.tasks(id) on delete cascade,
   label_id uuid not null references public.labels(id) on delete cascade,
@@ -73,6 +116,11 @@ create table if not exists public.task_labels (
   primary key (task_id, label_id)
 );
 
+-- ----------------------------------------------------------------------------
+-- task_user_assignees
+-- ----------------------------------------------------------------------------
+-- Join table: task <-> real user profile.
+-- This drives cross-user task visibility.
 create table if not exists public.task_user_assignees (
   task_id uuid not null references public.tasks(id) on delete cascade,
   assignee_user_id uuid not null references public.profiles(id) on delete cascade,
@@ -81,6 +129,9 @@ create table if not exists public.task_user_assignees (
   primary key (task_id, assignee_user_id)
 );
 
+-- ----------------------------------------------------------------------------
+-- comments
+-- ----------------------------------------------------------------------------
 create table if not exists public.comments (
   id uuid primary key default gen_random_uuid(),
   task_id uuid not null references public.tasks(id) on delete cascade,
@@ -89,6 +140,10 @@ create table if not exists public.comments (
   created_at timestamptz not null default now()
 );
 
+-- ----------------------------------------------------------------------------
+-- task_activities
+-- ----------------------------------------------------------------------------
+-- Audit-style event timeline for task changes.
 create table if not exists public.task_activities (
   id uuid primary key default gen_random_uuid(),
   task_id uuid not null references public.tasks(id) on delete cascade,
@@ -99,6 +154,10 @@ create table if not exists public.task_activities (
   created_at timestamptz not null default now()
 );
 
+-- ----------------------------------------------------------------------------
+-- indexes
+-- ----------------------------------------------------------------------------
+-- Performance + uniqueness constraints.
 create index if not exists idx_tasks_user_id on public.tasks(user_id);
 create index if not exists idx_tasks_status on public.tasks(status);
 create index if not exists idx_tasks_due_date on public.tasks(due_date);
@@ -122,6 +181,9 @@ create index if not exists idx_task_activities_user_id on public.task_activities
 create index if not exists idx_task_activities_task_id on public.task_activities(task_id);
 create index if not exists idx_task_activities_created_at on public.task_activities(created_at);
 
+-- ----------------------------------------------------------------------------
+-- RLS enablement
+-- ----------------------------------------------------------------------------
 alter table public.tasks enable row level security;
 alter table public.team_members enable row level security;
 alter table public.labels enable row level security;
@@ -132,6 +194,10 @@ alter table public.task_user_assignees enable row level security;
 alter table public.comments enable row level security;
 alter table public.task_activities enable row level security;
 
+-- ----------------------------------------------------------------------------
+-- Grants
+-- ----------------------------------------------------------------------------
+-- Grants allow query attempts; RLS policies still decide actual row access.
 grant usage on schema public to anon, authenticated;
 grant select, insert, update on table public.profiles to authenticated;
 grant select, insert, update, delete on table public.tasks to authenticated;
@@ -143,6 +209,10 @@ grant select, insert, delete on table public.task_user_assignees to authenticate
 grant select, insert, update, delete on table public.comments to authenticated;
 grant select, insert, update, delete on table public.task_activities to authenticated;
 
+-- ----------------------------------------------------------------------------
+-- Helper access functions
+-- ----------------------------------------------------------------------------
+-- These are SECURITY DEFINER so they can check related tables safely within RLS.
 create or replace function public.is_task_owner(task_uuid uuid)
 returns boolean
 language sql
@@ -180,6 +250,7 @@ as $$
   select public.is_task_owner(task_uuid) or public.is_task_assignee(task_uuid);
 $$;
 
+-- Lock down direct function access and re-grant only to authenticated role.
 revoke all on function public.is_task_owner(uuid) from public;
 revoke all on function public.is_task_assignee(uuid) from public;
 revoke all on function public.can_access_task(uuid) from public;
@@ -187,6 +258,8 @@ grant execute on function public.is_task_owner(uuid) to authenticated;
 grant execute on function public.is_task_assignee(uuid) to authenticated;
 grant execute on function public.can_access_task(uuid) to authenticated;
 
+-- Team-level access helper:
+-- true when user is team owner OR appears as member in that team's roster.
 create or replace function public.can_access_team(team_owner_id uuid)
 returns boolean
 language sql
@@ -206,6 +279,10 @@ $$;
 revoke all on function public.can_access_team(uuid) from public;
 grant execute on function public.can_access_team(uuid) to authenticated;
 
+-- ----------------------------------------------------------------------------
+-- Profile bootstrap RPC + auth trigger
+-- ----------------------------------------------------------------------------
+-- `ensure_my_profile` is called from frontend bootstrap to avoid 409 insert races.
 create or replace function public.ensure_my_profile(
   p_display_name text,
   p_avatar_url text,
@@ -234,6 +311,7 @@ $$;
 revoke all on function public.ensure_my_profile(text, text, text) from public;
 grant execute on function public.ensure_my_profile(text, text, text) to authenticated;
 
+-- Trigger helper to auto-create profile row when auth user is created.
 create or replace function public.handle_new_auth_user_profile()
 returns trigger
 language plpgsql
@@ -253,11 +331,13 @@ begin
 end;
 $$;
 
+-- Ensure trigger exists with fresh definition.
 drop trigger if exists on_auth_user_created_profile on auth.users;
 create trigger on_auth_user_created_profile
 after insert on auth.users
 for each row execute function public.handle_new_auth_user_profile();
 
+-- Backfill existing auth users into profiles table.
 insert into public.profiles (id, display_name, avatar_url, color)
 select
   u.id,
@@ -267,6 +347,10 @@ select
 from auth.users u
 on conflict (id) do nothing;
 
+-- ----------------------------------------------------------------------------
+-- Policy reset
+-- ----------------------------------------------------------------------------
+-- Drop then recreate policies to keep this file deterministic over time.
 drop policy if exists "tasks_select_own" on public.tasks;
 drop policy if exists "tasks_insert_own" on public.tasks;
 drop policy if exists "tasks_update_own" on public.tasks;
@@ -302,6 +386,9 @@ drop policy if exists "task_activities_insert_own" on public.task_activities;
 drop policy if exists "task_activities_update_own" on public.task_activities;
 drop policy if exists "task_activities_delete_own" on public.task_activities;
 
+-- ----------------------------------------------------------------------------
+-- tasks policies
+-- ----------------------------------------------------------------------------
 create policy "tasks_select_own"
   on public.tasks
   for select
@@ -327,6 +414,9 @@ create policy "tasks_delete_own"
   to authenticated
   using (auth.uid() = user_id);
 
+-- ----------------------------------------------------------------------------
+-- profiles policies
+-- ----------------------------------------------------------------------------
 create policy "profiles_select_all"
   on public.profiles
   for select
@@ -346,6 +436,9 @@ create policy "profiles_update_own"
   using (auth.uid() = id)
   with check (auth.uid() = id);
 
+-- ----------------------------------------------------------------------------
+-- team_members policies
+-- ----------------------------------------------------------------------------
 create policy "team_members_select_own"
   on public.team_members
   for select
@@ -371,6 +464,9 @@ create policy "team_members_delete_own"
   to authenticated
   using (auth.uid() = user_id);
 
+-- ----------------------------------------------------------------------------
+-- labels policies
+-- ----------------------------------------------------------------------------
 create policy "labels_select_own"
   on public.labels
   for select
@@ -396,6 +492,9 @@ create policy "labels_delete_own"
   to authenticated
   using (auth.uid() = user_id);
 
+-- ----------------------------------------------------------------------------
+-- task_assignees policies
+-- ----------------------------------------------------------------------------
 create policy "task_assignees_select_own"
   on public.task_assignees
   for select
@@ -431,6 +530,9 @@ create policy "task_assignees_delete_own"
   to authenticated
   using (auth.uid() = user_id);
 
+-- ----------------------------------------------------------------------------
+-- task_labels policies
+-- ----------------------------------------------------------------------------
 create policy "task_labels_select_own"
   on public.task_labels
   for select
@@ -466,6 +568,9 @@ create policy "task_labels_delete_own"
   to authenticated
   using (auth.uid() = user_id);
 
+-- ----------------------------------------------------------------------------
+-- task_user_assignees policies
+-- ----------------------------------------------------------------------------
 create policy "task_user_assignees_select_access"
   on public.task_user_assignees
   for select
@@ -494,6 +599,9 @@ create policy "task_user_assignees_delete_owner"
     or public.is_task_owner(task_id)
   );
 
+-- ----------------------------------------------------------------------------
+-- comments policies
+-- ----------------------------------------------------------------------------
 create policy "comments_select_own"
   on public.comments
   for select
@@ -522,6 +630,9 @@ create policy "comments_delete_own"
   to authenticated
   using (auth.uid() = user_id);
 
+-- ----------------------------------------------------------------------------
+-- task_activities policies
+-- ----------------------------------------------------------------------------
 create policy "task_activities_select_own"
   on public.task_activities
   for select
@@ -554,6 +665,10 @@ create policy "task_activities_delete_own"
   to authenticated
   using (auth.uid() = user_id);
 
+-- ----------------------------------------------------------------------------
+-- Realtime publication safety
+-- ----------------------------------------------------------------------------
+-- Add each table to `supabase_realtime` only when not already present.
 do $$
 begin
   if not exists (

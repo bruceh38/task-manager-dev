@@ -1,3 +1,11 @@
+/**
+ * Modal used to create a new task.
+ *
+ * Teaching notes:
+ * - This component owns only temporary form state.
+ * - Actual persistence happens in parent `App.tsx` through `onCreate`.
+ * - The component is intentionally "controlled": every input mirrors React state.
+ */
 import { FormEvent, useState } from 'react';
 import type { Label, Priority, TeamMember, UserProfile } from '../types';
 
@@ -20,17 +28,25 @@ interface TaskModalProps {
 }
 
 export function TaskModal({ open, members, labels, users, currentUserId, onClose, onCreate }: TaskModalProps) {
+  // Core form fields.
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<Priority>('normal');
   const [dueDate, setDueDate] = useState('');
+
+  // Multi-select IDs for joins.
   const [assigneeIds, setAssigneeIds] = useState<string[]>([]);
   const [labelIds, setLabelIds] = useState<string[]>([]);
   const [userAssigneeIds, setUserAssigneeIds] = useState<string[]>([]);
+
+  // Temporary dropdown selection for real-user add flow.
   const [pendingUserAssigneeId, setPendingUserAssigneeId] = useState('');
+
+  // Request + error state.
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // If modal is closed, do not render any DOM.
   if (!open) return null;
 
   function toggleAssignee(memberId: string) {
@@ -49,6 +65,10 @@ export function TaskModal({ open, members, labels, users, currentUserId, onClose
     );
   }
 
+  /**
+   * Add currently selected user from dropdown into selected chips.
+   * No duplicates are inserted.
+   */
   function addPendingUserAssignee() {
     if (!pendingUserAssigneeId) return;
     setUserAssigneeIds((current) => (current.includes(pendingUserAssigneeId) ? current : [...current, pendingUserAssigneeId]));
@@ -65,6 +85,8 @@ export function TaskModal({ open, members, labels, users, currentUserId, onClose
     try {
       setSubmitting(true);
       setError(null);
+
+      // Delegate persistence to parent.
       await onCreate({
         title: title.trim(),
         description: description.trim(),
@@ -74,6 +96,8 @@ export function TaskModal({ open, members, labels, users, currentUserId, onClose
         labelIds,
         userAssigneeIds,
       });
+
+      // Reset local form after successful creation.
       setTitle('');
       setDescription('');
       setPriority('normal');
@@ -92,6 +116,7 @@ export function TaskModal({ open, members, labels, users, currentUserId, onClose
 
   return (
     <div className="modal-backdrop" role="presentation" onClick={onClose}>
+      {/* Stop propagation so clicking inside panel does not close modal. */}
       <div className="modal-panel" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
         <header>
           <h2>New Task</h2>
@@ -179,6 +204,8 @@ export function TaskModal({ open, members, labels, users, currentUserId, onClose
           <fieldset className="assignee-fieldset">
             <legend>Real users</legend>
             {users.filter((user) => user.id !== currentUserId).length === 0 ? <p className="assignee-empty">No other users available.</p> : null}
+
+            {/* Dropdown-based add flow keeps the UI compact even with many users. */}
             {users.filter((user) => user.id !== currentUserId).length > 0 ? (
               <div className="form-grid">
                 <label>
@@ -199,6 +226,8 @@ export function TaskModal({ open, members, labels, users, currentUserId, onClose
                 </button>
               </div>
             ) : null}
+
+            {/* Selected users become chips; clicking removes selection. */}
             {userAssigneeIds.length > 0 ? (
               <div className="assignee-options">
                 {userAssigneeIds.map((id) => {

@@ -1,3 +1,18 @@
+/**
+ * Right-side detail panel for a selected task.
+ *
+ * This component combines several responsibilities in one workflow-oriented UI:
+ * - Edit core task fields (title/description/priority/due date)
+ * - Update label links
+ * - Update real-user assignees
+ * - Read and post comments
+ * - Read activity timeline
+ *
+ * Architectural pattern:
+ * - Component owns local form state.
+ * - Parent (`App.tsx`) owns persistence functions passed as props.
+ * - This keeps DB logic centralized while letting this panel stay UI-focused.
+ */
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { format, formatDistanceToNowStrict } from 'date-fns';
 import { STATUS_LABELS } from '../constants';
@@ -6,13 +21,18 @@ import type { Comment, Label, Priority, Task, TaskActivity, UserProfile } from '
 interface TaskDetailPanelProps {
   open: boolean;
   task: Task | null;
+
+  // Already filtered to current task by parent.
   comments: Comment[];
   activities: TaskActivity[];
   userAssignees: UserProfile[];
+
+  // Full/partial lookup collections used by this panel.
   labels: Label[];
   taskLabels: Label[];
   users: UserProfile[];
   currentUserId: string | null;
+
   onClose: () => void;
   onAddComment: (taskId: string, body: string) => Promise<void>;
   onUpdateTask: (taskId: string, input: { title: string; description: string; priority: Priority; dueDate: string | null }) => Promise<void>;
@@ -36,29 +56,49 @@ export function TaskDetailPanel({
   onUpdateLabels,
   onUpdateUserAssignments,
 }: TaskDetailPanelProps) {
+  // Comment draft field.
   const [body, setBody] = useState('');
+
+  // Core editable task fields.
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<Priority>('normal');
   const [dueDate, setDueDate] = useState('');
+
+  // Selection state for label/user link updates.
   const [selectedLabelIds, setSelectedLabelIds] = useState<string[]>([]);
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
+
+  // Temporary dropdown value for adding a user to current selection.
   const [pendingUserId, setPendingUserId] = useState('');
+
+  // Async operation flags.
   const [commentSubmitting, setCommentSubmitting] = useState(false);
   const [savingTask, setSavingTask] = useState(false);
   const [savingAssignments, setSavingAssignments] = useState(false);
+
+  // Shared error surface for this panel.
   const [error, setError] = useState<string | null>(null);
 
+  /**
+   * Comments are shown oldest -> newest.
+   */
   const orderedComments = useMemo(
     () => [...comments].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()),
     [comments],
   );
 
+  /**
+   * Activity is shown newest -> oldest.
+   */
   const orderedActivities = useMemo(
     () => [...activities].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
     [activities],
   );
 
+  /**
+   * Whenever selected task changes, hydrate form inputs from task data.
+   */
   useEffect(() => {
     if (!task) return;
     setTitle(task.title);
@@ -67,16 +107,25 @@ export function TaskDetailPanel({
     setDueDate(task.due_date ?? '');
   }, [task]);
 
+  /**
+   * Keep selected labels in sync with task's current label links.
+   */
   useEffect(() => {
     setSelectedLabelIds(taskLabels.map((label) => label.id));
   }, [taskLabels]);
 
+  /**
+   * Keep selected users in sync with task's current real-user assignees.
+   */
   useEffect(() => {
     setSelectedUserIds(userAssignees.map((user) => user.id));
   }, [userAssignees]);
 
+  // If panel closed or task missing, render nothing.
   if (!open || !task) return null;
   const currentTask = task;
+
+  // Don't let user assign task to themselves from this selector.
   const availableUsers = users.filter((user) => user.id !== currentUserId);
 
   function toggleLabel(labelId: string) {
@@ -161,6 +210,7 @@ export function TaskDetailPanel({
 
   return (
     <div className="detail-backdrop" role="presentation" onClick={onClose}>
+      {/* Stop click bubbling so inside clicks do not close panel. */}
       <aside className="detail-panel" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
         <header>
           <h2>{currentTask.title}</h2>
@@ -215,32 +265,10 @@ export function TaskDetailPanel({
           </form>
         </section>
 
-        {/* <section className="detail-assignees">
-          <h3>Assignees</h3>
-          <div className="assignee-options">
-            {members.length === 0 ? <p className="assignee-empty">No team members yet.</p> : null}
-            {members.map((member) => {
-              const selected = selectedMemberIds.includes(member.id);
-              return (
-                <label key={member.id} className={`assignee-option ${selected ? 'selected' : ''}`}>
-                  <input
-                    type="checkbox"
-                    checked={selected}
-                    onChange={() => toggleMember(member.id)}
-                    aria-label={`Assign ${member.name}`}
-                  />
-                  <span className="avatar avatar-fallback" style={{ background: member.color }}>
-                    {member.name.slice(0, 1).toUpperCase()}
-                  </span>
-                  <span>{member.name}</span>
-                </label>
-              );
-            })}
-          </div>
-          <button type="button" onClick={handleAssignmentsSave} disabled={savingAssignments}>
-            {savingAssignments ? 'Saving...' : 'Save assignees'}
-          </button>
-        </section> */}
+        {/*
+          Historical team-assignee UI is intentionally left disabled in this component,
+          because the current product direction prioritizes real-user assignment.
+        */}
 
         <section className="detail-assignees">
           <h3>Labels</h3>
@@ -271,6 +299,7 @@ export function TaskDetailPanel({
         <section className="detail-assignees">
           <h3>Real Users</h3>
           {availableUsers.length === 0 ? <p className="assignee-empty">No other users yet.</p> : null}
+
           {availableUsers.length > 0 ? (
             <div className="form-grid">
               <label>
@@ -289,6 +318,7 @@ export function TaskDetailPanel({
               </button>
             </div>
           ) : null}
+
           {selectedUserIds.length > 0 ? (
             <div className="assignee-options">
               {selectedUserIds.map((userId) => {

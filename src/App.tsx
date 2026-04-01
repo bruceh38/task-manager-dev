@@ -1,3 +1,20 @@
+/**
+ * Application orchestration layer.
+ *
+ * This is the most important file for understanding runtime behavior.
+ * It coordinates:
+ * - auth/session bootstrap
+ * - board data loading
+ * - realtime refresh subscriptions
+ * - derived view models for rendering
+ * - all write operations (create/update/assign/comment/activity)
+ * - drag-and-drop state transitions
+ *
+ * Component philosophy used here:
+ * - Keep all Supabase queries/mutations centralized in one place.
+ * - Keep leaf components mostly presentational.
+ * - Pass handlers + already-grouped data down via props.
+ */
 import { DndContext, DragEndEvent, DragStartEvent, PointerSensor, closestCorners, useSensor, useSensors } from '@dnd-kit/core';
 import { isPast, isToday, parseISO } from 'date-fns';
 import { useEffect, useMemo, useState } from 'react';
@@ -22,6 +39,7 @@ import type {
   UserProfile,
 } from './types';
 
+/** Payload shape used to batch-insert activity log entries. */
 interface ActivityInput {
   task_id: string;
   event_type: TaskActivity['event_type'];
@@ -29,6 +47,13 @@ interface ActivityInput {
   metadata?: Record<string, string | null> | null;
 }
 
+/**
+ * Determine destination status for a drag-drop end event.
+ *
+ * Cases:
+ * - User drops directly onto column area => `overId` is a status key.
+ * - User drops onto another task card => infer status from that task.
+ */
 function resolveDropStatus(overId: string, tasks: Task[]): TaskStatus | null {
   if (STATUS_ORDER.includes(overId as TaskStatus)) {
     return overId as TaskStatus;
@@ -38,12 +63,22 @@ function resolveDropStatus(overId: string, tasks: Task[]): TaskStatus | null {
   return targetTask?.status ?? null;
 }
 
+/**
+ * Due-date helper for summary metrics.
+ */
 function isOverdue(dueDate: string | null): boolean {
   if (!dueDate) return false;
   const date = parseISO(dueDate);
   return isPast(date) && !isToday(date);
 }
 
+/**
+ * Single board refresh query bundle.
+ *
+ * Design goal:
+ * - Pull all data needed for one render snapshot.
+ * - Include both tasks I own and tasks assigned to me as a real-user assignee.
+ */
 async function loadBoardData(currentUserId: string) {
   const [ownedTaskRes, assignedTaskIdsRes, memberRes, labelRes, profilesRes] = await Promise.all([
     supabase.from('tasks').select('*').eq('user_id', currentUserId).order('created_at', { ascending: false }),
@@ -69,6 +104,7 @@ async function loadBoardData(currentUserId: string) {
     assignedTasks = (data as Task[]) ?? [];
   }
 
+  // Merge owner + assigned tasks by id to avoid duplicates.
   const tasksById = new Map<string, Task>();
   for (const task of ownedTasks) tasksById.set(task.id, task);
   for (const task of assignedTasks) tasksById.set(task.id, task);
@@ -77,6 +113,7 @@ async function loadBoardData(currentUserId: string) {
   );
   const taskIds = tasks.map((task) => task.id);
 
+  // Short-circuit when no tasks: avoids unnecessary IN (...) queries.
   if (taskIds.length === 0) {
     return {
       tasks,
@@ -92,6 +129,7 @@ async function loadBoardData(currentUserId: string) {
     };
   }
 
+  // Fetch all per-task relationship tables in parallel.
   const [assignmentRes, taskLabelRes, taskUserAssigneeRes, commentRes, activityRes] = await Promise.all([
     supabase.from('task_assignees').select('*').in('task_id', taskIds),
     supabase.from('task_labels').select('*').in('task_id', taskIds),
@@ -121,6 +159,7 @@ async function loadBoardData(currentUserId: string) {
 }
 
 export default function App() {
+  // Source-of-truth collections.
   const [tasks, setTasks] = useState<Task[]>([]);
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [visibleTeamMembers, setVisibleTeamMembers] = useState<TeamMember[]>([]);
@@ -131,6 +170,8 @@ export default function App() {
   const [taskUserAssignees, setTaskUserAssignees] = useState<TaskUserAssignee[]>([]);
   const [comments, setComments] = useState<Comment[]>([]);
   const [activities, setActivities] = useState<TaskActivity[]>([]);
+
+  // UI state.
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -141,8 +182,16 @@ export default function App() {
   const [labelFilter, setLabelFilter] = useState<'all' | string>('all');
   const [activeColumn, setActiveColumn] = useState<TaskStatus | null>(null);
 
+  // Drag activation threshold avoids accidental drags on tiny pointer movement.
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
+  /**
+   * Bootstrap lifecycle:
+   * - ensure auth
+   * - ensure profile row
+   * - load initial data
+   * - start realtime subscriptions
+   */
   useEffect(() => {
     let alive = true;
     let channel: ReturnType<typeof supabase.channel> | null = null;
@@ -170,6 +219,7 @@ export default function App() {
         if (!alive) return;
         setUserId(user.id);
 
+        // Keep profile row guaranteed for this auth uid (avoids 409 races from direct inserts).
         const defaultName = user.user_metadata?.name || `User-${user.id.slice(0, 6)}`;
         const { error: ensureProfileError } = await supabase.rpc('ensure_my_profile', {
           p_display_name: defaultName,
@@ -182,6 +232,8 @@ export default function App() {
 
         await refresh(user.id);
 
+        // Subscribe to all core tables and do full refresh on any change.
+        // This favors consistency and simpler reasoning over minimal query volume.
         channel = supabase
           .channel(`board-${user.id}`)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, async () => {
@@ -240,6 +292,10 @@ export default function App() {
     };
   }, []);
 
+  /**
+   * Fast lookup: taskId -> set(labelId)
+   * Used for filter checks without repeatedly scanning full join array.
+   */
   const taskLabelIdSetByTaskId = useMemo(() => {
     const mapping: Record<string, Set<string>> = {};
     for (const taskLabel of taskLabels) {
@@ -251,6 +307,9 @@ export default function App() {
     return mapping;
   }, [taskLabels]);
 
+  /**
+   * Apply text + priority + label filters.
+   */
   const visibleTasks = useMemo(() => {
     const searchTerm = search.trim().toLowerCase();
     return tasks.filter((task) => {
@@ -265,6 +324,9 @@ export default function App() {
     });
   }, [tasks, search, priorityFilter, labelFilter, taskLabelIdSetByTaskId]);
 
+  /**
+   * Pre-group tasks by status for column rendering.
+   */
   const groupedTasks = useMemo(() => {
     return STATUS_ORDER.reduce<Record<TaskStatus, Task[]>>(
       (acc, status) => {
@@ -280,6 +342,7 @@ export default function App() {
     );
   }, [visibleTasks]);
 
+  /** taskId -> team-member-assignees[] */
   const taskAssigneesByTaskId = useMemo(() => {
     const memberById = new Map(members.map((member) => [member.id, member]));
     const mapping: Record<string, TeamMember[]> = {};
@@ -296,6 +359,7 @@ export default function App() {
     return mapping;
   }, [members, taskAssignees]);
 
+  /** taskId -> real-user-assignees[] */
   const taskUserAssigneesByTaskId = useMemo(() => {
     const profileById = new Map(userProfiles.map((profile) => [profile.id, profile]));
     const mapping: Record<string, UserProfile[]> = {};
@@ -312,6 +376,7 @@ export default function App() {
     return mapping;
   }, [userProfiles, taskUserAssignees]);
 
+  /** taskId -> labels[] */
   const taskLabelsByTaskId = useMemo(() => {
     const labelById = new Map(labels.map((label) => [label.id, label]));
     const mapping: Record<string, Label[]> = {};
@@ -328,6 +393,7 @@ export default function App() {
     return mapping;
   }, [labels, taskLabels]);
 
+  /** taskId -> comments[] */
   const commentsByTaskId = useMemo(() => {
     const mapping: Record<string, Comment[]> = {};
     for (const comment of comments) {
@@ -339,6 +405,7 @@ export default function App() {
     return mapping;
   }, [comments]);
 
+  /** taskId -> activities[] */
   const activitiesByTaskId = useMemo(() => {
     const mapping: Record<string, TaskActivity[]> = {};
     for (const activity of activities) {
@@ -350,6 +417,13 @@ export default function App() {
     return mapping;
   }, [activities]);
 
+  /**
+   * Teams the current user belongs to (not owns).
+   *
+   * Derivation logic:
+   * - Group all visible team members by team owner (`member.user_id`).
+   * - Keep teams where current user appears as linked `profile_user_id`.
+   */
   const teamMemberships = useMemo(() => {
     const grouped: Record<string, TeamMember[]> = {};
     for (const member of visibleTeamMembers) {
@@ -372,6 +446,7 @@ export default function App() {
 
   const selectedTask = useMemo(() => tasks.find((task) => task.id === selectedTaskId) ?? null, [tasks, selectedTaskId]);
 
+  /** Header stat pills. */
   const summary = useMemo(() => {
     const total = tasks.length;
     const complete = tasks.filter((task) => task.status === 'done').length;
@@ -379,6 +454,7 @@ export default function App() {
     return { total, complete, overdue };
   }, [tasks]);
 
+  /** Insert activity rows in one call. */
   async function createActivities(items: ActivityInput[]) {
     if (!userId || items.length === 0) return;
 
@@ -394,6 +470,13 @@ export default function App() {
     }
   }
 
+  /**
+   * Create a team member.
+   *
+   * Two modes:
+   * - real-user linked member (`profileUserId` present) -> upsert using conflict key
+   * - free-form member (`profileUserId` absent) -> regular insert
+   */
   async function createMember(input: { name: string; color: string; avatarUrl: string | null; profileUserId?: string | null }) {
     if (!userId) throw new Error('Guest session not ready.');
     if (input.profileUserId) {
@@ -433,13 +516,17 @@ export default function App() {
     if (insertError) throw insertError;
   }
 
+  /** Update profile display name for current user. */
   async function renameSelf(displayName: string) {
     if (!userId) throw new Error('Guest session not ready.');
     const { error: updateError } = await supabase.from('profiles').update({ display_name: displayName }).eq('id', userId);
     if (updateError) throw updateError;
+
+    // Optimistically mirror result so UI updates immediately.
     setUserProfiles((current) => current.map((profile) => (profile.id === userId ? { ...profile, display_name: displayName } : profile)));
   }
 
+  /** Add an existing real user into my team list. */
   async function addMemberFromRealUser(profileUserId: string) {
     const profile = userProfiles.find((user) => user.id === profileUserId);
     if (!profile) {
@@ -453,6 +540,7 @@ export default function App() {
     });
   }
 
+  /** Create task and all selected join links. */
   async function createTask(input: {
     title: string;
     description: string;
@@ -518,6 +606,7 @@ export default function App() {
     if (insertError) throw insertError;
   }
 
+  /** Update core task fields and generate detailed activity records for changed fields only. */
   async function updateTaskDetails(taskId: string, input: { title: string; description: string; priority: Priority; dueDate: string | null }) {
     const existing = tasks.find((task) => task.id === taskId);
     if (!existing) return;
@@ -547,6 +636,11 @@ export default function App() {
     await createActivities(items);
   }
 
+  /**
+   * Replace real-user assignee set via diff:
+   * - delete removed IDs
+   * - insert added IDs
+   */
   async function updateTaskUserAssignments(taskId: string, userIds: string[]) {
     if (!userId) throw new Error('Guest session not ready.');
 
@@ -590,6 +684,7 @@ export default function App() {
     await createActivities(items);
   }
 
+  /** Replace task labels via add/remove diff. */
   async function updateTaskLabels(taskId: string, labelIds: string[]) {
     if (!userId) throw new Error('Guest session not ready.');
 
@@ -627,6 +722,12 @@ export default function App() {
     await createActivities(items);
   }
 
+  /**
+   * Drag-drop status update:
+   * - optimistic local change
+   * - persist to DB
+   * - rollback on failure
+   */
   async function updateTaskStatus(taskId: string, status: TaskStatus) {
     const existing = tasks.find((task) => task.id === taskId);
     if (!existing || existing.status === status) return;
@@ -635,6 +736,7 @@ export default function App() {
     const { error: updateError } = await supabase.from('tasks').update({ status }).eq('id', taskId).eq('user_id', existing.user_id);
 
     if (updateError) {
+      // Rollback optimistic change if DB write fails.
       setTasks((current) => current.map((task) => (task.id === taskId ? existing : task)));
       setError(updateError.message);
       return;

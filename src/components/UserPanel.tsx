@@ -1,3 +1,11 @@
+/**
+ * Sidebar panel for account + team relationships.
+ *
+ * This component merges three related views:
+ * 1) Rename your own profile display name.
+ * 2) See your current team members.
+ * 3) Add real users into your team and see teams you belong to.
+ */
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import type { TeamMember, UserProfile } from '../types';
 
@@ -15,19 +23,27 @@ interface UserPanelProps {
 }
 
 export function UserPanel({ users, members, teamMemberships, currentUserId, onRenameSelf, onAddMemberFromUser }: UserPanelProps) {
+  // Exclude current user from "other real users" list.
   const visibleUsers = users.filter((user) => user.id !== currentUserId);
+
+  // Current user's full profile for initializing rename form state.
   const currentUser = useMemo(() => users.find((user) => user.id === currentUserId) ?? null, [users, currentUserId]);
+
   const [displayName, setDisplayName] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Track add-member request state and dropdown choice.
   const [addingUserId, setAddingUserId] = useState<string | null>(null);
   const [pendingUserId, setPendingUserId] = useState('');
 
+  // Set of linked real-user IDs already in your team; used to disable duplicate adds.
   const memberProfileIdSet = useMemo(
     () => new Set(members.map((member) => member.profile_user_id).filter((id): id is string => Boolean(id))),
     [members],
   );
 
+  // Keep form value in sync whenever current user profile changes.
   useEffect(() => {
     setDisplayName(currentUser?.display_name ?? '');
   }, [currentUser]);

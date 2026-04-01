@@ -1,3 +1,11 @@
+/**
+ * Visual card for one task.
+ *
+ * Responsibilities:
+ * - Register as draggable item.
+ * - Display summary information (title, description, priority, labels, assignees, due state).
+ * - Provide entry point to open task detail panel.
+ */
 import { CSS } from '@dnd-kit/utilities';
 import { formatDistanceToNowStrict, isPast, isToday, parseISO } from 'date-fns';
 import { useDraggable } from '@dnd-kit/core';
@@ -7,12 +15,17 @@ import type { Label, Task, TeamMember, UserProfile } from '../types';
 
 interface TaskCardProps {
   task: Task;
+  // Team-member assignees (owner-local roster assignments).
   assignees: TeamMember[];
+  // Real user assignees (cross-user assignments).
   userAssignees: UserProfile[];
   labels: Label[];
   onOpenDetails: (taskId: string) => void;
 }
 
+/**
+ * Derive due-date state for badge tone.
+ */
 function dueTone(dateValue: string | null) {
   if (!dateValue) return 'none';
   const date = parseISO(dateValue);
@@ -22,6 +35,7 @@ function dueTone(dateValue: string | null) {
 }
 
 export function TaskCard({ task, assignees, userAssignees, labels, onOpenDetails }: TaskCardProps) {
+  // Register this card as draggable.
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: task.id,
     data: {
@@ -30,6 +44,7 @@ export function TaskCard({ task, assignees, userAssignees, labels, onOpenDetails
     },
   });
 
+  // dnd-kit gives translation values while dragging; convert them to CSS transform string.
   const style = {
     transform: CSS.Translate.toString(transform),
   };
@@ -51,6 +66,7 @@ export function TaskCard({ task, assignees, userAssignees, labels, onOpenDetails
       <h4>{task.title}</h4>
       {task.description ? <p>{task.description}</p> : null}
 
+      {/* Team-member avatars */}
       {assignees.length > 0 ? (
         <div className="task-assignees" aria-label="Assignees">
           {assignees.slice(0, 4).map((member) =>
@@ -66,6 +82,7 @@ export function TaskCard({ task, assignees, userAssignees, labels, onOpenDetails
         </div>
       ) : null}
 
+      {/* Real-user avatars */}
       {userAssignees.length > 0 ? (
         <div className="task-assignees" aria-label="Assigned users">
           {userAssignees.slice(0, 4).map((user) =>
@@ -96,6 +113,12 @@ export function TaskCard({ task, assignees, userAssignees, labels, onOpenDetails
           Due {formatDistanceToNowStrict(parseISO(task.due_date), { addSuffix: true })}
         </footer>
       ) : null}
+
+      {/*
+        Important drag behavior note:
+        `onPointerDown={stopPropagation}` prevents this button from starting a card drag
+        when the user's intention is to click "Details".
+      */}
       <button
         type="button"
         className="details-trigger"

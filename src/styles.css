@@ -1,3 +1,19 @@
+/*
+  Global stylesheet for the task board.
+
+  Reading map:
+  - Theme tokens and global resets at the top
+  - Layout scaffolding (shell/topbar/board)
+  - Reusable components (cards/chips/forms/buttons)
+  - Modal and detail-drawer surfaces
+  - Sidebar panel styles
+  - Responsive overrides at the end
+
+  Product-specific constraints:
+  - White/pink visual tone
+  - Hard corners (no curved borders)
+  - Unified primary button style for all actions
+*/
 :root {
   --bg: #fff8fc;
   --bg-accent: radial-gradient(circle at 16% 12%, #ffe3f1 0%, #fff8fc 34%),
@@ -17,6 +33,7 @@
 
 .app-shell,
 .app-shell * {
+  /* Product requirement: force square corners globally. */
   border-radius: 0 !important;
 }
 
@@ -41,6 +58,7 @@ textarea {
 }
 
 .app-shell {
+  /* Keep app centered and capped to viewport width. */
   width: min(1300px, 100vw);
   max-width: 100%;
   margin: 0 auto;
@@ -67,6 +85,7 @@ textarea {
 }
 
 .topbar {
+  /* Header row: title + summary pills + CTA button. */
   display: grid;
   gap: 1rem;
   grid-template-columns: 1fr auto auto;
@@ -115,6 +134,7 @@ button,
 .primary,
 .secondary,
 button[type='submit'] {
+  /* Unified button treatment across the entire UI. */
   border: 0;
   border-radius: 0.74rem;
   background: linear-gradient(120deg, #340c47, #240947);
@@ -137,6 +157,7 @@ button:disabled {
 }
 
 .controls {
+  /* Search and filter controls row. */
   display: flex;
   gap: 0.8rem;
   margin-bottom: 1rem;
@@ -175,6 +196,7 @@ button:disabled {
 }
 
 .board-layout {
+  /* Main horizontal layout containing sidebar and board grid. */
   display: flex;
   gap: 1rem;
   align-items: flex-start;
@@ -204,6 +226,7 @@ button:disabled {
 }
 
 .board-column {
+  /* Single Kanban status column. */
   background: var(--surface-alt);
   border: 1px solid var(--border);
   border-radius: 1rem;
@@ -252,6 +275,7 @@ button:disabled {
 }
 
 .task-card {
+  /* Draggable task card block. */
   background: var(--surface);
   border: 1px solid var(--border);
   border-left: 4px solid transparent;
@@ -447,6 +471,7 @@ button:disabled {
 }
 
 .modal-backdrop {
+  /* Full-screen overlay for centered modal dialogs. */
   position: fixed;
   inset: 0;
   background: rgba(15, 23, 42, 0.5);
@@ -559,6 +584,7 @@ button:disabled {
 }
 
 .detail-backdrop {
+  /* Full-screen overlay for right-side detail drawer. */
   position: fixed;
   inset: 0;
   background: rgba(73, 11, 39, 0.38);

@@ -1,3 +1,11 @@
+/**
+ * Label management sidebar panel.
+ *
+ * Responsibilities:
+ * - Show existing labels for current owner.
+ * - Provide a simple form to create a new label.
+ * - Keep transient form state local to the component.
+ */
 import { FormEvent, useState } from 'react';
 import type { Label } from '../types';
 
@@ -23,6 +31,7 @@ export function LabelPanel({ labels, onCreateLabel }: LabelPanelProps) {
       setSubmitting(true);
       setError(null);
       await onCreateLabel({ name: name.trim(), color });
+      // Reset to defaults after successful create.
       setName('');
       setColor('#db2777');
     } catch (createError) {

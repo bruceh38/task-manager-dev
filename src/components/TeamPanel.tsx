@@ -1,3 +1,10 @@
+/**
+ * Legacy standalone team panel.
+ *
+ * Note:
+ * This project currently uses `UserPanel` as the main sidebar for team/user workflows,
+ * but this component is kept in the codebase and can still be reused.
+ */
 import { FormEvent, useState } from 'react';
 import type { TeamMember } from '../types';
 
@@ -74,6 +81,10 @@ export function TeamPanel({ members, onCreateMember }: TeamPanelProps) {
             Color
             <input type="color" value={color} onChange={(event) => setColor(event.target.value)} />
           </label>
+          {/*
+            Avatar URL input intentionally hidden for current UX simplicity.
+            Keep state in place so the component can be re-enabled quickly.
+          */}
           {/* <label>
             Avatar URL (optional)
             <input value={avatarUrl} onChange={(event) => setAvatarUrl(event.target.value)} placeholder="https://..." />
